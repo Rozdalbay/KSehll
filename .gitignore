@@ -1,0 +1,37 @@
+# Build
+/build/
+build*/
+out/
+cmake-build-*/
+/dist/
+
+# Visual Studio
+.vs/
+.vscode/
+*.user
+*.suo
+*.VC.db
+*.VC.opendb
+
+# Compiled
+*.obj
+*.pdb
+*.ilk
+*.exe
+*.dll
+*.lib
+
+# Logs
+logs/
+
+# History / config (user data, keep out of repo)
+*.kshell_history
+.kshell/
+
+# IDE
+.idea/
+*.swp
+*.swo
+
+# Temp
+test_script.bat
