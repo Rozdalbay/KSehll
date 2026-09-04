@@ -1,5 +1,7 @@
 # KShell
 
+[Русская версия](README_RU.md)
+
 KShell is a native Windows command shell written in C++20. It implements its own
 lexer, parser, process manager, pipeline manager, and key handling, without
 relying on cmd.exe or PowerShell for command execution.
@@ -9,7 +11,7 @@ relying on cmd.exe or PowerShell for command execution.
 - Full-screen TUI environment with panels, tabs, and split panes (default mode)
 - Command palette with fuzzy search (Ctrl+Shift+P)
 - File browser, process manager, system monitor, git status, jobs, history, and env panels
-- 4 built-in themes (Dark, Light, High Contrast, Monochrome) with live switching
+- 4 built-in themes (Default, Monokai, Dracula, Solarized) with live switching
 - Interactive shell pane with scrollback and buffer sink
 - Custom command-line lexer and parser (quotes, escaping, variables, pipes, redirection)
 - Native process execution via `CreateProcessW`
@@ -27,6 +29,10 @@ relying on cmd.exe or PowerShell for command execution.
 - RAII-based Windows HANDLE management
 - Logger to %APPDATA%\KShell\logs\kshell.log
 - CMake + CTest test suite (55+ tests)
+- EN/RU language toggle with localization
+- Variable tracking with change history
+- Command tracing with filters
+- Script execution (.bat, .ps1) with variable capture
 
 ## Requirements
 
@@ -69,14 +75,18 @@ KShell.exe --help
 | Key | Action |
 |-----|--------|
 | Ctrl+Shift+P | Open command palette |
+| Ctrl+Shift+L | Toggle language EN/RU |
 | Ctrl+Shift+T | New tab |
 | Ctrl+Tab | Next tab |
 | Ctrl+Shift+Tab | Previous tab |
+| Ctrl+Shift+1..0 | Quick switch sidebar views |
 | Ctrl+Shift+F | Focus file panel |
 | Ctrl+Shift+M | Focus process panel |
 | Ctrl+Shift+S | Focus system panel |
 | Ctrl+Shift+G | Focus git panel |
 | Ctrl+Shift+E | Focus env panel |
+| Ctrl+Shift+V | Focus variables panel |
+| Ctrl+Shift+T | Focus trace panel |
 | Ctrl+Shift+J | Focus jobs panel |
 | Ctrl+Shift+H | Focus history panel |
 | Ctrl+Shift+W | Focus shell pane |
@@ -97,7 +107,11 @@ Built-ins: help, exit, quit, cd, pwd, dir, ls, mkdir, rmdir, touch, copy, move,
 del, type, cat, echo, clear, cls, set, unset, env, alias, unalias, history,
 jobs, kill, which, time, date, whoami, hostname, systeminfo,
 open, tree, where, find, search, sysinfo, proc, top, calc, json, theme, reload,
-fg, bg.
+fg, bg, trace, untrace, vars, clrtrace.
+
+PowerShell aliases: Get-Process, Get-ChildItem, Get-Content, Set-Location,
+New-Item, Remove-Item, Copy-Item, Move-Item, Get-History, Clear-Host, Write-Output,
+Get-Date, Get-User, Get-Hostname, Get-SystemInfo, Get-Environment.
 
 External programs are launched via CreateProcessW after searching the current
 directory and PATH.
@@ -166,6 +180,41 @@ theme set Monochrome
 
 Config file: `%APPDATA%\KShell\config.ini`. Created automatically on first run.
 Contains prompt, aliases, history size, theme, font, and TUI settings.
+
+## Variable Tracking
+
+```
+set foo=bar
+set foo=baz
+vars
+```
+
+Variables are tracked with change history. Open the Variables panel (Ctrl+Shift+9) to view.
+
+## Command Tracing
+
+```
+trace
+dir
+set x=1
+untrace
+```
+
+Open the Trace panel (Ctrl+Shift+0) to view the log. Filters: F1 (all), F2 (commands), F3 (execution), F4 (variables), F5 (directories).
+
+## Script Execution
+
+```
+test_script.bat
+script.ps1
+```
+
+`.bat` and `.ps1` scripts are executed automatically. Variables set via `set X=Y` in the script are captured into tracking.
+
+## Language Toggle
+
+- Click `[EN]`/`[RU]` button in the title bar
+- Keyboard shortcut: Ctrl+Shift+L
 
 ## Architecture
 
