@@ -399,11 +399,25 @@ void ShellPane::executeCommand(const std::wstring& line)
                 {
                     result.stderrText.pop_back();
                 }
-                ctx_.outputSink()->printError(result.stderrText);
+                // stderr не всегда означает ошибку: многие программы (например
+                // `git push`) пишут прогресс именно в stderr даже при успехе.
+                // Как ошибку помечаем только при реальном провале команды.
+                if (result.succeeded)
+                {
+                    ctx_.outputSink()->print(result.stderrText + L"\n");
+                }
+                else
+                {
+                    ctx_.outputSink()->printError(result.stderrText);
+                }
             }
             if (!result.succeeded && result.pid == 0)
             {
                 ctx_.outputSink()->printError(L"Command not found: " + cmd.program);
+            }
+            if (result.cancelled)
+            {
+                ctx_.outputSink()->print(L"[interrupted] Command stopped (Esc / Ctrl+C)\n");
             }
         }
         else if (pipeline.commands.size() == 2)
@@ -429,6 +443,10 @@ void ShellPane::executeCommand(const std::wstring& line)
                 }
                 ctx_.outputSink()->print(result.stdoutText + L"\n");
             }
+            if (result.cancelled)
+            {
+                ctx_.outputSink()->print(L"[interrupted] Command stopped (Esc / Ctrl+C)\n");
+            }
         }
         else
         {
@@ -450,6 +468,10 @@ void ShellPane::executeCommand(const std::wstring& line)
                         result.stdoutText.pop_back();
                     }
                     ctx_.outputSink()->print(result.stdoutText + L"\n");
+                }
+                if (result.cancelled)
+                {
+                    ctx_.outputSink()->print(L"[interrupted] Command stopped (Esc / Ctrl+C)\n");
                 }
             }
         }
@@ -506,6 +528,12 @@ void ShellPane::draw(RenderContext& rc)
     }
 
     int row = 0;
+    // Keep the last-rendered geometry so mouse events can map screen
+    // co-ordinates back to scrollback buffer lines.
+    firstVisible_ = firstVisible;
+    paneW_ = rc.bounds.w;
+    paneH_ = rc.bounds.h;
+
     for (int i = firstVisible; i < totalLines && row < viewH; ++i, ++row)
     {
         const auto& line = lines[i];
@@ -532,8 +560,84 @@ void ShellPane::draw(RenderContext& rc)
         {
             display = display.substr(0, maxW);
         }
-        rc.screen.putText(rc.bounds.y + row, rc.bounds.x, display,
-                          textFg, bg);
+
+        // Compute the portion of this line covered by the mouse selection.
+        int selColStart = 0;
+        int selColEnd = 0;
+        bool hasSelOnLine = false;
+        if (selAnchorLine_ >= 0 && selCursorLine_ >= 0)
+        {
+            int aL = selAnchorLine_, cL = selCursorLine_;
+            int l0 = std::min(aL, cL);
+            int l1 = std::max(aL, cL);
+            if (i >= l0 && i <= l1)
+            {
+                int c0 = (i == l0) ? selAnchorCol_ : selCursorCol_;
+                int c1 = (i == l1) ? selAnchorCol_ : selCursorCol_;
+                if (l0 == l1 && c0 > c1)
+                {
+                    std::swap(c0, c1);
+                }
+                if (i == l0 && i != l1)
+                {
+                    selColStart = c0;
+                    selColEnd = (int)display.size();
+                }
+                else if (i == l1 && i != l0)
+                {
+                    selColStart = 0;
+                    selColEnd = std::min(c1, (int)display.size());
+                }
+                else if (i == l0 && i == l1)
+                {
+                    selColStart = c0;
+                    selColEnd = std::min(c1, (int)display.size());
+                }
+                else
+                {
+                    selColStart = 0;
+                    selColEnd = (int)display.size();
+                }
+                if (selColStart > (int)display.size())
+                {
+                    selColStart = (int)display.size();
+                }
+                if (selColEnd < selColStart)
+                {
+                    selColEnd = selColStart;
+                }
+                if (selColEnd > (int)display.size())
+                {
+                    selColEnd = (int)display.size();
+                }
+                hasSelOnLine = selColEnd > selColStart;
+            }
+        }
+
+        if (!hasSelOnLine)
+        {
+            rc.screen.putText(rc.bounds.y + row, rc.bounds.x, display,
+                              textFg, bg);
+        }
+        else
+        {
+            // Draw the selected range with the selection background.
+            const auto selFg = t.color(render::Role::Foreground);
+            const auto selBg = t.color(render::Role::Selection);
+            if (selColStart > 0)
+            {
+                rc.screen.putText(rc.bounds.y + row, rc.bounds.x,
+                                  display.substr(0, selColStart), textFg, bg);
+            }
+            rc.screen.putText(rc.bounds.y + row, rc.bounds.x + selColStart,
+                              display.substr(selColStart, selColEnd - selColStart),
+                              selFg, selBg);
+            if (selColEnd < (int)display.size())
+            {
+                rc.screen.putText(rc.bounds.y + row, rc.bounds.x + selColEnd,
+                                  display.substr(selColEnd), textFg, bg);
+            }
+        }
     }
     buffer_.unlock();
 
@@ -770,6 +874,9 @@ bool ShellPane::onKey(const KeyEvent& key)
         }
         input_.insert(input_.begin() + inputCursor_, key.ch);
         ++inputCursor_;
+        // Typing replaces any prior mouse selection.
+        selAnchorLine_ = selCursorLine_ = -1;
+        selAnchorCol_ = selCursorCol_ = -1;
         return true;
     }
 
@@ -797,6 +904,218 @@ void ShellPane::onMouseWheel(int delta)
             scrollOffset_ = 0;
         }
     }
+}
+
+void ShellPane::mapToBuffer(int rowInPane, int colInPane, int& lineIdx, int& colIdx)
+{
+    buffer_.lock();
+    const auto& lines = buffer_.lines();
+    int idx = firstVisible_ + rowInPane;
+    if (idx < 0)
+    {
+        idx = 0;
+    }
+    if (idx >= (int)lines.size())
+    {
+        int n = (int)lines.size();
+        buffer_.unlock();
+        lineIdx = n;
+        colIdx = 0;
+        return;
+    }
+    int len = (int)lines[idx].size();
+    if (colInPane < 0)
+    {
+        colInPane = 0;
+    }
+    if (colInPane > len)
+    {
+        colInPane = len;
+    }
+    buffer_.unlock();
+    lineIdx = idx;
+    colIdx = colInPane;
+}
+
+std::wstring ShellPane::selectedText()
+{
+    std::wstring result;
+    if (selAnchorLine_ < 0 || selCursorLine_ < 0)
+    {
+        return result;
+    }
+    int l0 = std::min(selAnchorLine_, selCursorLine_);
+    int l1 = std::max(selAnchorLine_, selCursorLine_);
+    int c0 = (l0 == selAnchorLine_) ? selAnchorCol_ : selCursorCol_;
+    int c1 = (l1 == selAnchorLine_) ? selAnchorCol_ : selCursorCol_;
+
+    buffer_.lock();
+    const auto& lines = buffer_.lines();
+    for (int i = l0; i <= l1; ++i)
+    {
+        if (i >= (int)lines.size())
+        {
+            break;
+        }
+        const std::wstring& line = lines[i];
+        int len = (int)line.size();
+        std::wstring part;
+        if (l0 == l1)
+        {
+            int cs = std::min(c0, len);
+            int ce = std::min(c1, len);
+            if (ce < cs)
+            {
+                std::swap(cs, ce);
+            }
+            part = line.substr(cs, ce - cs);
+        }
+        else if (i == l0)
+        {
+            int cs = std::min(c0, len);
+            part = line.substr(cs);
+        }
+        else if (i == l1)
+        {
+            int ce = std::min(c1, len);
+            part = line.substr(0, ce);
+        }
+        else
+        {
+            part = line;
+        }
+        result += part;
+        if (i != l1)
+        {
+            result += L"\r\n";
+        }
+    }
+    buffer_.unlock();
+    return result;
+}
+
+void ShellPane::copyToClipboard(const std::wstring& text)
+{
+    if (text.empty())
+    {
+        return;
+    }
+    if (!::OpenClipboard(nullptr))
+    {
+        return;
+    }
+    ::EmptyClipboard();
+    HGLOBAL mem = ::GlobalAlloc(GMEM_MOVEABLE, (text.size() + 1) * sizeof(wchar_t));
+    if (mem)
+    {
+        wchar_t* dst = static_cast<wchar_t*>(::GlobalLock(mem));
+        if (dst)
+        {
+            ::memcpy(dst, text.c_str(), text.size() * sizeof(wchar_t));
+            dst[text.size()] = L'\0';
+            ::GlobalUnlock(mem);
+            ::SetClipboardData(CF_UNICODETEXT, mem);
+        }
+        else
+        {
+            ::GlobalFree(mem);
+        }
+    }
+    ::CloseClipboard();
+}
+
+std::wstring ShellPane::clipboardText()
+{
+    std::wstring result;
+    if (!::OpenClipboard(nullptr))
+    {
+        return result;
+    }
+    if (::IsClipboardFormatAvailable(CF_UNICODETEXT))
+    {
+        HANDLE h = ::GetClipboardData(CF_UNICODETEXT);
+        if (h)
+        {
+            const wchar_t* p = static_cast<const wchar_t*>(::GlobalLock(h));
+            if (p)
+            {
+                result = p;
+                ::GlobalUnlock(h);
+            }
+        }
+    }
+    ::CloseClipboard();
+    return result;
+}
+
+void ShellPane::insertInput(const std::wstring& text)
+{
+    input_.insert(input_.begin() + (ptrdiff_t)inputCursor_, text.begin(), text.end());
+    inputCursor_ += text.size();
+    // Editing the input line supersedes any pending mouse selection.
+    selAnchorLine_ = selCursorLine_ = -1;
+    selAnchorCol_ = selCursorCol_ = -1;
+}
+
+void ShellPane::onMousePress(int rowInPane, int colInPane)
+{
+    int line = 0;
+    int col = 0;
+    mapToBuffer(rowInPane, colInPane, line, col);
+    selecting_ = true;
+    selAnchorLine_ = line;
+    selAnchorCol_ = col;
+    selCursorLine_ = line;
+    selCursorCol_ = col;
+}
+
+void ShellPane::onMouseDrag(int rowInPane, int colInPane)
+{
+    if (!selecting_)
+    {
+        onMousePress(rowInPane, colInPane);
+        return;
+    }
+    int line = 0;
+    int col = 0;
+    mapToBuffer(rowInPane, colInPane, line, col);
+    selCursorLine_ = line;
+    selCursorCol_ = col;
+}
+
+void ShellPane::onMouseRelease(int rowInPane, int colInPane)
+{
+    if (!selecting_)
+    {
+        return;
+    }
+    onMouseDrag(rowInPane, colInPane);
+    selecting_ = false;  // keep anchor/cursor so the highlight stays visible
+    if (selAnchorLine_ >= 0 && selCursorLine_ >= 0)
+    {
+        copyToClipboard(selectedText());
+    }
+}
+
+void ShellPane::onMousePaste(int rowInPane, int colInPane)
+{
+    std::wstring text = clipboardText();
+    if (text.empty())
+    {
+        return;
+    }
+    // If the click landed on the input line, place the cursor there first.
+    if (rowInPane == paneH_ - 1)
+    {
+        int promptLen = (int)ctx_.promptText().size();
+        int x = (int)input_.size();
+        if (colInPane - promptLen > 0 && colInPane - promptLen < (int)input_.size())
+        {
+            x = colInPane - promptLen;
+        }
+        inputCursor_ = (size_t)x;
+    }
+    insertInput(text);
 }
 
 } // namespace kshell::ui

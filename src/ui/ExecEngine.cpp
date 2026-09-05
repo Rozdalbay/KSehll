@@ -2,12 +2,18 @@
 
 #include <windows.h>
 
+#include <thread>
+
 namespace kshell::ui
 {
 
 namespace
 {
 
+CancelPoll g_cancelPoll = nullptr;
+
+// Read a pipe fully into a UTF-8 string, then convert to wide text.
+// Runs on its own thread so a chatty process can't deadlock the capture.
 void pipeToString(HANDLE readPipe, std::wstring& out)
 {
     std::string bytes;
@@ -114,22 +120,57 @@ CaptureResult launchAndCapture(const std::wstring& app,
     std::wstring stdoutText;
     std::wstring stderrText;
 
-    // Read stdout and stderr on the calling thread sequentially.
-    pipeToString(hStdoutRead, stdoutText);
-    ::CloseHandle(hStdoutRead);
-    pipeToString(hStderrRead, stderrText);
-    ::CloseHandle(hStderrRead);
+    // Read stdout and stderr on separate threads so neither pipe can fill up
+    // and deadlock, and so we can interrupt a hung process below.
+    std::thread readerOut([&hStdoutRead, &stdoutText] { pipeToString(hStdoutRead, stdoutText); });
+    std::thread readerErr([&hStderrRead, &stderrText] { pipeToString(hStderrRead, stderrText); });
 
-    DWORD exitCode = 0;
-    ::WaitForSingleObject(pi.hProcess, 300000);
+    // Poll the process instead of blocking forever: a hung command (e.g. git
+    // waiting on the network or a credential prompt) must not freeze the UI.
+    bool   cancelled = false;
+    DWORD  exitCode = 0;
+    DWORD  waitedMs = 0;
+    const DWORD kWaitLimitMs = 300000;
+    for (;;)
+    {
+        const DWORD wait = ::WaitForSingleObject(pi.hProcess, 50);
+        if (wait == WAIT_OBJECT_0)
+        {
+            break;
+        }
+        if (wait == WAIT_TIMEOUT)
+        {
+            waitedMs += 50;
+            if (g_cancelPoll && g_cancelPoll())
+            {
+                ::TerminateProcess(pi.hProcess, 1);
+                cancelled = true;
+                break;
+            }
+            if (waitedMs >= kWaitLimitMs)
+            {
+                ::TerminateProcess(pi.hProcess, 1);
+                break;
+            }
+            continue;
+        }
+        break;
+    }
+
     ::GetExitCodeProcess(pi.hProcess, &exitCode);
     ::CloseHandle(pi.hProcess);
+
+    readerOut.join();
+    readerErr.join();
+    ::CloseHandle(hStdoutRead);
+    ::CloseHandle(hStderrRead);
 
     result.pid = pi.dwProcessId;
     result.exitCode = (int)exitCode;
     result.stdoutText = std::move(stdoutText);
     result.stderrText = std::move(stderrText);
     result.succeeded = (exitCode == 0);
+    result.cancelled = cancelled;
     if (freq.QuadPart != 0)
     {
         LARGE_INTEGER end{};
@@ -221,8 +262,38 @@ CaptureResult ExecEngine::runPipeline2(const std::wstring& exe1, const std::wstr
     }
     ::CloseHandle(pi2.hThread);
 
-    ::WaitForSingleObject(pi1.hProcess, 300000);
-    ::WaitForSingleObject(pi2.hProcess, 300000);
+    // Poll for the second process to exit instead of blocking forever so a
+    // hung pipeline can still be interrupted with Esc / Ctrl+C.
+    bool cancelled = false;
+    DWORD waitedMs = 0;
+    const DWORD kWaitLimitMs = 300000;
+    for (;;)
+    {
+        const DWORD wait = ::WaitForSingleObject(pi2.hProcess, 50);
+        if (wait == WAIT_OBJECT_0)
+        {
+            break;
+        }
+        if (wait == WAIT_TIMEOUT)
+        {
+            waitedMs += 50;
+            if (g_cancelPoll && g_cancelPoll())
+            {
+                ::TerminateProcess(pi1.hProcess, 1);
+                ::TerminateProcess(pi2.hProcess, 1);
+                cancelled = true;
+                break;
+            }
+            if (waitedMs >= kWaitLimitMs)
+            {
+                ::TerminateProcess(pi1.hProcess, 1);
+                ::TerminateProcess(pi2.hProcess, 1);
+                break;
+            }
+            continue;
+        }
+        break;
+    }
 
     DWORD code1 = 0;
     DWORD code2 = 0;
@@ -235,7 +306,13 @@ CaptureResult ExecEngine::runPipeline2(const std::wstring& exe1, const std::wstr
     result.exitCode = (int)code2;
     result.pid = pi2.dwProcessId;
     result.succeeded = (code2 == 0);
+    result.cancelled = cancelled;
     return result;
 }
 
 } // namespace kshell::ui
+
+void kshell::ui::ExecEngine::setCancelPoll(CancelPoll poll)
+{
+    g_cancelPoll = poll;
+}

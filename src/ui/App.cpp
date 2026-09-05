@@ -56,6 +56,42 @@ std::wstring ansiMove(int row, int col)
     return buf;
 }
 
+// Poll callback installed into ExecEngine. While an external command runs it
+// is called periodically; if the user presses Esc or Ctrl+C we request
+// cancellation so the TUI doesn't appear frozen by a hung process.
+bool execCancelPoll()
+{
+    HANDLE h = ::GetStdHandle(STD_INPUT_HANDLE);
+    if (h == INVALID_HANDLE_VALUE || h == nullptr)
+    {
+        return false;
+    }
+    INPUT_RECORD recs[16];
+    DWORD n = 0;
+    if (!::PeekConsoleInputW(h, recs, 16, &n) || n == 0)
+    {
+        return false;
+    }
+    for (DWORD i = 0; i < n; ++i)
+    {
+        if (recs[i].EventType != KEY_EVENT || !recs[i].Event.KeyEvent.bKeyDown)
+        {
+            continue;
+        }
+        const WORD vk = recs[i].Event.KeyEvent.wVirtualKeyCode;
+        if (vk == VK_ESCAPE)
+        {
+            return true;
+        }
+        const DWORD ctrl = recs[i].Event.KeyEvent.dwControlKeyState;
+        if (vk == 'C' && (ctrl & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED)))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 App::App() = default;
@@ -90,12 +126,22 @@ bool App::initConsole()
         altScreen_ = true;
     }
 
-    // Enable extended input.
+    // Enable extended input (raw event mode).
     DWORD inMode = savedInMode_;
     inMode |= ENABLE_EXTENDED_FLAGS;
     inMode &= ~ENABLE_QUICK_EDIT_MODE;
     inMode |= ENABLE_MOUSE_INPUT;
+    // Process input as key events instead of console control signals: with
+    // ENABLE_PROCESSED_INPUT set, Ctrl+C raises CTRL_C_EVENT and the default
+    // handler terminates the whole process. We need Ctrl+C to arrive as a
+    // normal key event so it can cancel a command or clear the input line.
+    inMode &= ~ENABLE_PROCESSED_INPUT;
+    inMode &= ~ENABLE_LINE_INPUT;
+    inMode &= ~ENABLE_ECHO_INPUT;
     ::SetConsoleMode(hIn_, inMode);
+
+    // Allow Esc / Ctrl+C to interrupt a hung external command.
+    ExecEngine::setCancelPoll(execCancelPoll);
 
     // Hide cursor (we draw our own).
     if (vtProcessing_)
@@ -563,11 +609,69 @@ void App::handleMouseEvent(const MOUSE_EVENT_RECORD& e)
         return;
     }
 
-    // Mouse click selection (left button press).
-    if (e.dwButtonState & FROM_LEFT_1ST_BUTTON_PRESSED)
+    const bool leftDown  = (e.dwButtonState & FROM_LEFT_1ST_BUTTON_PRESSED) != 0;
+    const bool rightDown = (e.dwButtonState & RIGHTMOST_BUTTON_PRESSED) != 0;
+    const bool moving    = (e.dwEventFlags & MOUSE_MOVED) != 0;
+    const bool isDouble  = (e.dwEventFlags & DOUBLE_CLICK) != 0;
+
+    const int row = e.dwMousePosition.Y;
+    const int col = e.dwMousePosition.X;
+
+    int titleH = 1;
+    int tabBarH = 1;
+    int mainY = titleH + tabBarH;
+    int contentX = sidebarWidth_ + 1;
+
+    // Right-click pastes clipboard content into the terminal panel.
+    if (rightDown && viewMode_ == ViewMode::Terminal &&
+        activeTab_ < (int)tabs_.size())
     {
-        bool isDouble = (e.dwEventFlags & DOUBLE_CLICK) != 0;
-        handleMouseClick(e.dwMousePosition.Y, e.dwMousePosition.X, isDouble);
+        int rowInPane = row - mainY;
+        int colInPane = col - contentX;
+        tabs_[activeTab_]->onMousePaste(rowInPane, colInPane);
+        return;
+    }
+
+    const bool inContent = row >= mainY && col >= contentX && !palette_.isOpen();
+
+    // Left button pressed: start a text selection in the terminal pane,
+    // otherwise fall back to plain click handling.
+    if (leftDown && !moving && !isDouble)
+    {
+        if (viewMode_ == ViewMode::Terminal && inContent &&
+            activeTab_ < (int)tabs_.size())
+        {
+            mouseDrag_ = true;
+            tabs_[activeTab_]->onMousePress(row - mainY, col - contentX);
+        }
+        else
+        {
+            handleMouseClick(row, col, false);
+        }
+        return;
+    }
+
+    // Left button moving: extend the in-progress selection.
+    if (moving && mouseDrag_ && viewMode_ == ViewMode::Terminal &&
+        activeTab_ < (int)tabs_.size())
+    {
+        tabs_[activeTab_]->onMouseDrag(row - mainY, col - contentX);
+        return;
+    }
+
+    // Left button released: finish the selection and copy it.
+    if (!leftDown && mouseDrag_ && viewMode_ == ViewMode::Terminal &&
+        activeTab_ < (int)tabs_.size())
+    {
+        tabs_[activeTab_]->onMouseRelease(row - mainY, col - contentX);
+        mouseDrag_ = false;
+        return;
+    }
+
+    // Fall back to plain click handling for other cases (e.g. double-click).
+    if (leftDown && !moving)
+    {
+        handleMouseClick(row, col, isDouble);
     }
 }
 

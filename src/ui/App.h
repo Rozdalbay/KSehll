@@ -87,6 +87,9 @@ private:
     int  sidebarWidth_ = 24;
     int  sidebarSelected_ = 0;
 
+    // Mouse text selection state (left-button drag inside the terminal pane).
+    bool   mouseDrag_ = false;
+
     // Console handles.
     HANDLE hIn_ = INVALID_HANDLE_VALUE;
     HANDLE hOut_ = INVALID_HANDLE_VALUE;
