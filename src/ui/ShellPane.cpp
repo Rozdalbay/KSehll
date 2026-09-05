@@ -313,7 +313,11 @@ void ShellPane::executeCommand(const std::wstring& line)
             }
         }
 
-        if (allBuiltin && pipeline.commands.size() == 1)
+        // Run a single builtin if present. A builtin may return handled == false
+        // to request fall-through to external resolution (e.g. the `git`
+        // passthrough); in that case we must NOT swallow the command here.
+        bool builtinHandled = false;
+        if (pipeline.commands.size() == 1 && allBuiltin)
         {
             auto builtinFn = findBuiltin(pipeline.commands[0].program);
             if (builtinFn)
@@ -330,13 +334,17 @@ void ShellPane::executeCommand(const std::wstring& line)
                     ctx_.outputSink()->printLine(L"Goodbye.");
                     exitRequested_ = true;
                 }
-                continue;
+                builtinHandled = result.handled;
             }
+        }
+        if (builtinHandled)
+        {
+            continue;
         }
 
         // External command execution (with capture).
         ctx_.refreshExecutor();
-        if (pipeline.commands.size() == 1 && !allBuiltin)
+        if (pipeline.commands.size() == 1)
         {
             const auto& cmd = pipeline.commands[0];
             std::wstring cwd = ctx_.currentDirectory();

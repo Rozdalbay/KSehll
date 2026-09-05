@@ -178,23 +178,21 @@ Shell::ProcessInputResult Shell::processLine(const std::wstring& line)
 
     for (auto& pipeline : pipelines)
     {
+        bool builtinHandled = false;
+
         for (const auto& cmd : pipeline.commands)
         {
-            const std::wstring lower = stringutils::toLower(cmd.program);
-
-            bool isBuiltin = false;
             BuiltinFunction builtinFunc = nullptr;
             for (const auto& entry : builtinTable())
             {
                 if (stringutils::equalsIgnoreCase(cmd.program, entry.name))
                 {
                     builtinFunc = entry.function;
-                    isBuiltin = true;
                     break;
                 }
             }
 
-            if (isBuiltin && pipeline.commands.size() == 1 && builtinFunc)
+            if (builtinFunc && pipeline.commands.size() == 1)
             {
                 std::vector<std::wstring> fullArgs;
                 fullArgs.push_back(cmd.program);
@@ -207,28 +205,18 @@ Shell::ProcessInputResult Shell::processLine(const std::wstring& line)
                 {
                     return ProcessInputResult::Exit;
                 }
-                if (!result.handled)
+                // A builtin may report handled == false to request fall-through
+                // to external execution (e.g. the `git` passthrough builtin).
+                if (result.handled)
                 {
-                    continue;
+                    builtinHandled = true;
                 }
             }
         }
 
-        if (pipeline.commands.size() == 1)
+        if (builtinHandled)
         {
-            bool isBuiltin = false;
-            for (const auto& entry : builtinTable())
-            {
-                if (stringutils::equalsIgnoreCase(pipeline.commands[0].program, entry.name))
-                {
-                    isBuiltin = true;
-                    break;
-                }
-            }
-            if (isBuiltin)
-            {
-                continue;
-            }
+            continue;
         }
 
         ctx_.refreshExecutor();

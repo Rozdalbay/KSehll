@@ -80,9 +80,15 @@ CaptureResult launchAndCapture(const std::wstring& app,
     // Pass lpApplicationName when we have an explicit exe path (e.g. cmd.exe)
     // so that Windows resolves the executable correctly instead of trying to
     // parse it from the command line.
-    const wchar_t* appPtr = app.empty() ? nullptr : app.c_str();
+    // Pass lpApplicationName only when we have an explicit exe path so that
+    // Windows resolves the executable correctly instead of trying to parse it
+    // from the command line. A bare program name (no path separators) must go
+    // through PATH resolution instead: CreateProcessW does NOT search PATH when
+    // lpApplicationName is supplied and will fail with ERROR_FILE_NOT_FOUND.
+    const bool appHasPath = (app.find_first_of(L"\\/") != std::wstring::npos);
+    const wchar_t* appPtr = (!app.empty() && appHasPath) ? app.c_str() : nullptr;
 
-    DWORD flags = CREATE_UNICODE_ENVIRONMENT | CREATE_NEW_CONSOLE;
+    DWORD flags = CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW;
 
     BOOL ok = ::CreateProcessW(appPtr, mutableCmd.data(), nullptr, nullptr, TRUE,
                                flags, envMutable, cwdPtr, &si, &pi);
@@ -115,7 +121,7 @@ CaptureResult launchAndCapture(const std::wstring& app,
     ::CloseHandle(hStderrRead);
 
     DWORD exitCode = 0;
-    ::WaitForSingleObject(pi.hProcess, 60000);
+    ::WaitForSingleObject(pi.hProcess, 300000);
     ::GetExitCodeProcess(pi.hProcess, &exitCode);
     ::CloseHandle(pi.hProcess);
 
@@ -174,8 +180,11 @@ CaptureResult ExecEngine::runPipeline2(const std::wstring& exe1, const std::wstr
     const wchar_t* envPtr = envBlock.empty() ? nullptr : envBlock.c_str();
     LPVOID envMutable = const_cast<LPVOID>(static_cast<const void*>(envPtr));
 
-    BOOL ok = ::CreateProcessW(exe1.empty() ? nullptr : exe1.c_str(), cmd1Buf.data(), nullptr, nullptr, TRUE,
-                               CREATE_UNICODE_ENVIRONMENT | CREATE_NEW_CONSOLE,
+    const bool exe1HasPath = (exe1.find_first_of(L"\\/") != std::wstring::npos);
+    const wchar_t* exe1Ptr = (!exe1.empty() && exe1HasPath) ? exe1.c_str() : nullptr;
+
+    BOOL ok = ::CreateProcessW(exe1Ptr, cmd1Buf.data(), nullptr, nullptr, TRUE,
+                               CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW,
                                envMutable, cwdPtr, &si1, &pi1);
     ::CloseHandle(hWrite);
     if (!ok)
@@ -197,8 +206,11 @@ CaptureResult ExecEngine::runPipeline2(const std::wstring& exe1, const std::wstr
     std::vector<wchar_t> cmd2Buf(cmd2.begin(), cmd2.end());
     cmd2Buf.push_back(L'\0');
 
-    ok = ::CreateProcessW(exe2.empty() ? nullptr : exe2.c_str(), cmd2Buf.data(), nullptr, nullptr, TRUE,
-                          CREATE_UNICODE_ENVIRONMENT | CREATE_NEW_CONSOLE,
+    const bool exe2HasPath = (exe2.find_first_of(L"\\/") != std::wstring::npos);
+    const wchar_t* exe2Ptr = (!exe2.empty() && exe2HasPath) ? exe2.c_str() : nullptr;
+
+    ok = ::CreateProcessW(exe2Ptr, cmd2Buf.data(), nullptr, nullptr, TRUE,
+                          CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW,
                           envMutable, cwdPtr, &si2, &pi2);
     ::CloseHandle(hRead);
     if (!ok)
@@ -209,8 +221,8 @@ CaptureResult ExecEngine::runPipeline2(const std::wstring& exe1, const std::wstr
     }
     ::CloseHandle(pi2.hThread);
 
-    ::WaitForSingleObject(pi1.hProcess, 60000);
-    ::WaitForSingleObject(pi2.hProcess, 60000);
+    ::WaitForSingleObject(pi1.hProcess, 300000);
+    ::WaitForSingleObject(pi2.hProcess, 300000);
 
     DWORD code1 = 0;
     DWORD code2 = 0;
