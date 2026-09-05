@@ -680,7 +680,6 @@ void App::handleMouseClick(int row, int col, bool doubleClick)
     // Layout constants (must mirror renderFrame).
     int titleH = 1;
     int tabBarH = 1;
-    int statusH = 1;
     int mainY = titleH + tabBarH;
 
     // Click on the language indicator in the top-right to toggle EN/RU.
@@ -744,6 +743,7 @@ void App::handleMouseClick(int row, int col, bool doubleClick)
         {
         case ViewMode::Files:      filePane_.onMouseClick(rowInPane, colInPane, doubleClick); break;
         case ViewMode::Processes:  processPane_.onMouseClick(rowInPane, colInPane, doubleClick); break;
+        case ViewMode::Git:        gitPane_.onMouseClick(rowInPane, colInPane, doubleClick); break;
         default: break;
         }
     }

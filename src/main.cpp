@@ -56,6 +56,9 @@ int wmain(int argc, wchar_t* argv[])
         }
     }
 
+    // Suppress unused-variable warning until --tui is implemented.
+    (void)tuiMode;
+
     if (legacyMode)
     {
         kshell::Shell shell;

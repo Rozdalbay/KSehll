@@ -77,6 +77,7 @@ set(KSHELL_CORE_SOURCES
     src/process/ProcessManager.cpp
     src/system/SystemMonitor.cpp
     src/git/Git.cpp
+    src/git/GitHub.cpp
 
     src/ui/Ui.cpp
     src/ui/Fuzzy.cpp
@@ -90,7 +91,7 @@ set(KSHELL_CORE_SOURCES
 add_library(kshell_core STATIC ${KSHELL_CORE_SOURCES})
 target_include_directories(kshell_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
-target_link_libraries(kshell_core PRIVATE kernel32 user32 shell32 advapi32 shlwapi psapi)
+target_link_libraries(kshell_core PRIVATE kernel32 user32 shell32 advapi32 shlwapi psapi winhttp)
 
 if(MSVC)
     target_compile_options(kshell_core PRIVATE /MP)
