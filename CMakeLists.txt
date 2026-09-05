@@ -98,8 +98,24 @@ else()
     target_compile_options(kshell_core PRIVATE -finput-charset=UTF-8)
 endif()
 
-add_executable(KShell src/main.cpp)
-target_link_libraries(KShell PRIVATE kshell_core)
+# Compile the Windows resource (application icon) with windres.
+if(NOT MSVC)
+    find_program(KSHELL_WINDRES windres)
+    if(KSHELL_WINDRES)
+        add_executable(KShell src/main.cpp resources/KShell.rc)
+        target_link_libraries(KShell PRIVATE kshell_core)
+        # windres only supports a limited set of options; forward the include
+        # dir with -I so the relative ICON path inside the .rc resolves.
+        set_source_files_properties(resources/KShell.rc PROPERTIES
+            COMPILE_FLAGS "-I${CMAKE_CURRENT_SOURCE_DIR}")
+    else()
+        add_executable(KShell src/main.cpp)
+        target_link_libraries(KShell PRIVATE kshell_core)
+    endif()
+else()
+    add_executable(KShell src/main.cpp resources/KShell.rc)
+    target_link_libraries(KShell PRIVATE kshell_core)
+endif()
 
 if(NOT MSVC)
     target_link_options(KShell PRIVATE -municode -static)

@@ -1,0 +1,4 @@
+// KShell application resources.
+// The multi-resolution icon below is applied to the executable so it shows
+// up in Explorer, taskbar and title bar.
+IDI_APP ICON "resources/KShell.ico"
