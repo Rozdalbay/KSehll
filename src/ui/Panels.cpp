@@ -1705,7 +1705,6 @@ void GitPane::openDialog(DialogKind kind)
         dialogFieldCount_ = 2;
         dialogFieldTitles_[0] = L"Name";
         dialogFieldTitles_[1] = L"URL";
-        dialogFieldTitles_[0] = L"Name";
         dialogButtons_ = 2;
         dialogButtonTitle_ = L"Add";
         break;
@@ -2124,6 +2123,15 @@ void GitPane::keyOverview(const KeyEvent& key)
         return;
     case Key::L:
         runGitOp({ L"pull" }, L"Pulling...");
+        return;
+    case Key::S:
+        openDialog(DialogKind::Stash);
+        return;
+    case Key::X:
+        openDialog(DialogKind::PopStash);
+        return;
+    case Key::C:
+        openDialog(DialogKind::CloneRepo);
         return;
     default:
         break;
@@ -3123,7 +3131,7 @@ void GitPane::drawOverview(RenderContext& rc)
             : std::vector<std::wstring>{ L"Open on GitHub", L"Refresh", L"Fetch", L"Push", L"Pull" };
     drawButtons(rc, row, buttons, used);
     draw::text(rc, rc.bounds.h - 1, kNavW,
-               L"[O] open   [F] fetch   [P] push   [L] pull   [F5] refresh",
+               L"[O] open   [F] fetch   [P] push   [L] pull   [S] stash   [X] pop   [C] clone   [F5] refresh",
                render::Role::Muted);
 }
 

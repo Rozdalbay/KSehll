@@ -11,6 +11,7 @@ relying on cmd.exe or PowerShell for command execution.
 - Full-screen TUI environment with panels, tabs, and split panes (default mode)
 - Command palette with fuzzy search (Ctrl+Shift+P)
 - File browser, process manager, system monitor, git status, jobs, history, and env panels
+- Full Git client: Overview, Changes + diff viewer + commit, branches, history, commit graph, remotes, and a GitHub tab (repos, pull requests, issues)
 - 4 built-in themes (Default, Monokai, Dracula, Solarized) with live switching
 - Interactive shell pane with scrollback and buffer sink
 - Custom command-line lexer and parser (quotes, escaping, variables, pipes, redirection)
@@ -100,6 +101,86 @@ KShell.exe --help
 | Tab | Autocomplete |
 | Ctrl+C | Cancel running command |
 | Ctrl+L | Clear screen |
+
+## Git / GitHub Client
+
+Open the Git panel with `Ctrl+Shift+G`. It has 7 sections, switched with **Left / Right**
+(or `[` / `]`):
+
+| Section | Purpose |
+|---------|---------|
+| Overview | Repository status, current branch, ahead/behind, remote URL, last commit, quick actions |
+| Changes | File list, diff viewer, staging, commit message fields, commit / commit & push |
+| Branches | Create, rename, delete, merge, checkout branches |
+| History | Commit list with detail pane; copy hash, branch from commit, revert, reset |
+| Graph | ASCII commit graph |
+| Remotes | Fetch, push, pull, add/remove remotes |
+| GitHub | Connect with a personal access token, browse your repos, create pull requests and issues |
+
+### Overview
+| Key | Action |
+|-----|--------|
+| O | Open repository on GitHub (browser) |
+| F | Fetch |
+| P | Push |
+| L | Pull |
+| S | Stash changes |
+| X | Pop stash |
+| C | Clone repository |
+| R / F5 | Refresh |
+
+### Changes
+| Key | Action |
+|-----|--------|
+| Enter / Space / S / U | Stage / unstage selected file |
+| A | Stage all |
+| Z | Unstage all |
+| D | Discard selected file (confirm) |
+| Tab | Switch between file list and commit message |
+| C | Commit |
+| P | Commit & push |
+| X | Toggle unified / side-by-side diff |
+
+### Branches
+| Key | Action |
+|-----|--------|
+| Enter | Check out branch |
+| N | Create branch |
+| R | Rename branch |
+| D | Delete branch (confirm) |
+| M | Merge branch |
+| F | Fetch all |
+
+### History
+| Key | Action |
+|-----|--------|
+| C | Copy full commit hash |
+| B | Create branch from commit |
+| V | Revert commit |
+| R | Reset to commit |
+| F5 | Reload history |
+
+### Graph / Remotes
+
+- **Graph**: Up/Down scroll, R / F5 reload.
+- **Remotes**: F fetch, P push, L pull, A add remote, D remove (confirm), O open in browser.
+
+### GitHub
+| Key | Action |
+|-----|--------|
+| C | Connect / enter personal access token (stored in `%APPDATA%\KShell\github_token.txt`) |
+| Up/Down | Choose repository |
+| O | Open repository in browser |
+| N | Create pull request |
+| I | Create issue |
+| R / F5 | Refresh repository list |
+
+> **Note on Commit & Push.** "Push complete" means the local branch was pushed to the
+> repository's configured `origin`. If nothing shows up on GitHub, check the Remote line in
+> the Overview section (or run `git remote -v`): the local `origin` must point to the
+> expected GitHub repository. When the repository has no remote and the GitHub tab is
+> connected with a selected repository, `origin` is added automatically. Pushing from a
+> detached HEAD is refused with a hint instead of silently reporting success.
 
 ## Command List
 
