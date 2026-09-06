@@ -472,6 +472,43 @@ bool testPaneCommitDetached()
     return true;
 }
 
+bool testPaneCommitPush()
+{
+    // End-to-end against a local bare repo acting as "GitHub": the commit must
+    // actually reach a remote, exercising the push op after a commit. This
+    // guards against the push being swallowed by the history reload.
+    PaneHarness h;
+    std::wstring dir = createRepo();
+    std::wstring bare = makeTempDir();
+    setup(bare, L"init --bare");
+    setup(dir, L"remote add origin " + bare);
+    writeFile(dir + L"\\a.txt", L"line1\nline2\npushed\n");
+    h.pane.setWorkDir(dir);
+    h.pane.refresh();
+    h.settle();
+    h.pane.onKey(keyPress(ui::Key::Right)); // -> Changes
+    h.settle();
+    h.pane.onKey(keyText(L's')); // stage a.txt
+    h.settle();
+    h.pane.onKey(keyPress(ui::Key::Tab)); // -> CommitMsg
+    for (auto ch : { L'p', L'u', L's', L'h', L' ', L't', L'e', L's', L't' })
+    {
+        h.pane.onKey(keyText(ch));
+    }
+    h.pane.onKey(keyPress(ui::Key::Tab)); // -> CommitDesc
+    h.pane.onKey(keyPress(ui::Key::Tab)); // -> Files
+    h.pane.onKey(keyText(L'p'));          // commit & push
+    h.settle();
+    TEST_ASSERT_EQ(h.pane.statusStaged(), 0, L"Committed and clean");
+
+    // The bare remote must now contain branch main; a silent "up-to-date" no-op
+    // would leave rev-parse failing.
+    Git g;
+    TEST_ASSERT(g.run(bare, { L"rev-parse", L"main" }).ok,
+                L"Commit reached the remote after commit & push");
+    return true;
+}
+
 } // namespace
 
 int main()
@@ -489,6 +526,7 @@ int main()
         { L"GitPaneSections", testPaneSections },
         { L"GitPaneStageCommit", testPaneStageCommit },
         { L"GitPaneCommitDetached", testPaneCommitDetached },
+        { L"GitPaneCommitPush", testPaneCommitPush },
     };
     return runTests(tests);
 }

@@ -1452,6 +1452,7 @@ void GitPane::applyOp()
         {
             msg = L"Push complete";
             refreshStatus();
+            loadHistory();
             if (!status_.remoteUrl.empty())
             {
                 msg += L"  \u27a4  " + status_.remoteUrl;
@@ -1477,7 +1478,6 @@ void GitPane::applyOp()
             commitDesc_.clear();
             commitCursor_ = 0;
             refreshStatus();
-            loadHistory();
             if (op->extraB == L"push")
             {
                 if (status_.detachedHead)
@@ -1485,9 +1485,12 @@ void GitPane::applyOp()
                     // Commit landed on a detached HEAD: no branch ref moved, so a
                     // plain `git push` would be a silent no-op ("up-to-date").
                     showNotice(L"Commit created on detached HEAD - push skipped, create a branch in Branches and push again");
+                    loadHistory();
                 }
                 else
                 {
+                    // Start the push FIRST: loadHistory() would occupy the single
+                    // async-op slot and silently swallow the push.
                     showNotice(L"Commit created - pushing...");
                     runGitOp({ L"push" }, L"Pushing...");
                 }
@@ -1495,6 +1498,7 @@ void GitPane::applyOp()
             else
             {
                 showNotice(L"Commit created");
+                loadHistory();
             }
             return;
         }
@@ -1514,7 +1518,6 @@ void GitPane::applyOp()
             msg = L"Branch updated";
             refreshStatus();
             loadBranches();
-            loadHistory();
             return;
         }
         else if (cmd == L"merge")
